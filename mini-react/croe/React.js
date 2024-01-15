@@ -68,7 +68,17 @@ function commitRoot() {
 
 function commitWork(fiber) {
     if (!fiber) return;
-    fiber.parent.dom.append(fiber.dom);
+    // 这里要理解函数组件，函数组件在结构中是 先函数组件 -> 子节点（正常节点）
+    // 所以这里的parent实际指向函数组件，是没有dom的
+    // 因此要循环往上查找真实的parent，将函数组件的子节点添加上去。
+    let fiberParent = fiber.parent;
+    while (!fiberParent.dom) {
+        fiberParent = fiberParent.parent;
+    }
+    // 由于函数组件也会在链表中，所以要判断dom是否存在，存在即渲染
+    if (fiber.dom) {
+        fiberParent.dom.append(fiber.dom);
+    }
     commitWork(fiber.child);
     commitWork(fiber.sibling);
 }
@@ -85,8 +95,9 @@ function updateProps(props, dom) {
         }
     });
 }
-function initChildren(fiber) {
-    const children = fiber.props.children;
+
+// 将vdom转化成链表，设置好指针
+function initChildren(fiber, children) {
     let prevChild = null; // 表示设置的上一个的子节点
     children.forEach((item, index) => {
         // 由于要链表的设计需要一个父节点来查找叔叔节点，所以需要再子节点的vdom上添加一个父节点的标识，来连接到叔叔节点上
@@ -110,8 +121,14 @@ function initChildren(fiber) {
     });
 }
 
-// 在有空闲时间的情况下进行dom的渲染
-function preformFiberOfUtil(fiber) {
+function updateFunctionComponent(fiber) {
+    // 此处是获取fiber的子节点们，建立链表，但由于函数组件执行后返回的节点才是子节点，所以需要进行判断并使用数组包裹
+    const children = [fiber.type()];
+
+    initChildren(fiber, children);
+}
+
+function updateHostComponent(fiber) {
     if (!fiber.dom) {
         // 1. 创建 dom、挂载dom
         const dom = (fiber.dom = createDom(fiber.type));
@@ -120,29 +137,44 @@ function preformFiberOfUtil(fiber) {
         updateProps(fiber.props, dom);
     }
 
-    // 3. 将vdom转化成链表，设置好指针
-    initChildren(fiber);
+    const children = fiber.props.children;
+    initChildren(fiber, children);
+}
+
+// 在有空闲时间的情况下进行dom的渲染
+function preformFiberOfUtil(fiber) {
+    // 判断fiber的type是否是function,是的话表示fiber是个函数组件，
+    // 因为函数组件执行后本身就是dom所以不需要再创建dom
+    const isFunctionComponent = typeof fiber.type === "function";
+    if (isFunctionComponent) {
+        updateFunctionComponent(fiber);
+    } else {
+        updateHostComponent(fiber);
+    }
 
     // 4. 将下一个要执行的work返回回去
     if (fiber.child) {
         return fiber.child;
     }
 
-    if (fiber.sibling) {
-        return fiber.sibling;
+    // 多层dom嵌套的情况下，要层层往上找parent的sibling
+    let nextFiber = fiber;
+    while (nextFiber) {
+        if (nextFiber.sibling) {
+            return nextFiber.sibling;
+        }
+        nextFiber = nextFiber.parent;
     }
-
-    return findParent(fiber);
 }
 
 // 需要递归work.parent，否则如果work.parent的层级嵌套过深，则只会拿到一层的sibling
-function findParent(fiber) {
-    if (!fiber.parent) {
-        return;
-    }
+// function findParent(fiber) {
+//     if (!fiber.parent) {
+//         return;
+//     }
 
-    return fiber.parent?.sibling || findParent(fiber.parent);
-}
+//     return fiber.parent?.sibling || findParent(fiber.parent);
+// }
 
 requestIdleCallback(workLoop);
 
