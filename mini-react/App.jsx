@@ -1,19 +1,28 @@
 import React from './croe/React.js'
 
+let num = 1
+let id = "id1"
 function Counter() {
-    return <div>组件函数</div>
+    function handleClick() {
+        num++
+        React.update()
+    }
+    return (
+        <div id={id}>
+            组件函数: {num}
+            <button onClick={handleClick}>click</button>
+        </div>
+    )
 }
 
-const App = <div id='app'>
-    hello React
-    <Counter></Counter>
-    <div>
-        你好我是react
-        <div>你好我是children react111</div>
-        <div>你好我是children react2222</div>
-    </div>
-    <div>萨达所大</div>
-</div>
+const App = () => {
+    return (
+        <div id='app'>
+            hello React
+            <Counter></Counter>
+        </div>
+    )
+}
 
 
 export default App

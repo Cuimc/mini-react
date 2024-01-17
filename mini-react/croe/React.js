@@ -13,22 +13,24 @@ const createElement = (type, props, ...children) => {
         type,
         props: {
             ...props,
-            children: children.map((child) =>
-                typeof child === "string" ? createTextNode(child) : child
-            ),
+            children: children.map((child) => {
+                const isTextNode =
+                    typeof child === "string" || typeof child === "number";
+                return isTextNode ? createTextNode(child) : child;
+            }),
         },
     };
 };
 
 const render = (el, container) => {
-    newxtFiberOfUtil = {
+    wipRoot = {
         dom: container,
         props: {
             children: [el],
         },
     };
 
-    root = newxtFiberOfUtil;
+    nextFiberOfUnit = wipRoot;
 };
 
 /**
@@ -42,19 +44,20 @@ const render = (el, container) => {
  * 此时页面会卡主只显示一半的dom。
  * 解决思路：优化边创建边渲染，而是吧所有的dom都创建完成后，统一添加到根节点上去。
  */
-let root = null;
-let newxtFiberOfUtil = null;
+let wipRoot = null;
+let currentRoot = null;
+let nextFiberOfUnit = null;
 function workLoop(deadline) {
     let shouldYield = false;
-    while (!shouldYield && newxtFiberOfUtil) {
-        newxtFiberOfUtil = preformFiberOfUtil(newxtFiberOfUtil);
+    while (!shouldYield && nextFiberOfUnit) {
+        nextFiberOfUnit = preformFiberOfUnit(nextFiberOfUnit);
 
         shouldYield = deadline.timeRemaining() < 1;
     }
 
-    // 当newxtFiberOfUtil为false的时候就表示链表结束了，在此时可以执行挂载操作
+    // 当nextFiberOfUtil为false的时候就表示链表结束了，在此时可以执行挂载操作
     // 挂载到根节点，所以要获取到根节点，即在render中根节点
-    if (!newxtFiberOfUtil && root) {
+    if (!nextFiberOfUnit && wipRoot) {
         commitRoot();
     }
 
@@ -62,8 +65,9 @@ function workLoop(deadline) {
 }
 
 function commitRoot() {
-    commitWork(root.child);
-    root = null;
+    commitWork(wipRoot.child);
+    currentRoot = wipRoot;
+    wipRoot = null;
 }
 
 function commitWork(fiber) {
@@ -76,9 +80,16 @@ function commitWork(fiber) {
         fiberParent = fiberParent.parent;
     }
     // 由于函数组件也会在链表中，所以要判断dom是否存在，存在即渲染
-    if (fiber.dom) {
-        fiberParent.dom.append(fiber.dom);
+    // props更新：更新dom
+    if (fiber.effectTag === "placement") {
+        if (fiber.dom) {
+            fiberParent.dom.append(fiber.dom);
+        }
+    } else if (fiber.effectTag === "update") {
+        // 更新的话，需要旧的props和新的props
+        updateProps(fiber.dom, fiber.props, fiber.alertnate?.props);
     }
+
     commitWork(fiber.child);
     commitWork(fiber.sibling);
 }
@@ -88,29 +99,70 @@ function createDom(type) {
         ? document.createTextNode("")
         : document.createElement(type);
 }
-function updateProps(props, dom) {
-    Object.keys(props).forEach((key) => {
+function updateProps(dom, nextProps, prevProps) {
+    // 1. old有  new没有  删除操作
+    Object.keys(prevProps).forEach((key) => {
         if (key !== "children") {
-            dom[key] = props[key];
+            if (!(key in nextProps)) {
+                dom.removeAttribute(key);
+            }
+        }
+    });
+    // 2. new有  old没有  新增操作
+    // 3. new有  old有    修改操作
+    Object.keys(nextProps).forEach((key) => {
+        if (key !== "children") {
+            if (nextProps[key] !== prevProps[key]) {
+                if (key.startsWith("on")) {
+                    const eventType = key.slice("2").toLocaleLowerCase();
+                    dom.removeEventListener(eventType, prevProps[key]);
+                    dom.addEventListener(eventType, nextProps[key]);
+                }
+                dom[key] = nextProps[key];
+            }
         }
     });
 }
 
 // 将vdom转化成链表，设置好指针
-function initChildren(fiber, children) {
+function reconcileChildren(fiber, children) {
+    let oldFiber = fiber.alertnate?.child;
     let prevChild = null; // 表示设置的上一个的子节点
     children.forEach((item, index) => {
         // 由于要链表的设计需要一个父节点来查找叔叔节点，所以需要再子节点的vdom上添加一个父节点的标识，来连接到叔叔节点上
         // 但是由于子节点（item）是我们之前设计的vdom，如果直接在vdom上设置父节点的话，就会破坏原有的结构。
         // 所以需要新创建一个对象来表达对应关系
-        const newWork = {
-            type: item.type,
-            props: item.props,
-            child: null,
-            sibling: null,
-            parent: fiber,
-            dom: null,
-        };
+
+        // 判断标签是否相同，相同则表示更新，不相同则表示删除或新增
+        const isSameTag = oldFiber && oldFiber.type === item.type;
+        let newWork = null;
+        if (isSameTag) {
+            newWork = {
+                type: item.type,
+                props: item.props,
+                child: null,
+                sibling: null,
+                parent: fiber,
+                dom: oldFiber.dom, // 这里是因为更新，不牵扯dom的变化，所以使用old即可
+                effectTag: "update",
+                alertnate: oldFiber,
+            };
+        } else {
+            newWork = {
+                type: item.type,
+                props: item.props,
+                child: null,
+                sibling: null,
+                parent: fiber,
+                dom: null,
+                effectTag: "placement",
+            };
+        }
+
+        // 如果有多个子节点的
+        if (oldFiber) {
+            oldFiber = oldFiber.sibling;
+        }
 
         if (index === 0) {
             fiber.child = newWork;
@@ -123,9 +175,9 @@ function initChildren(fiber, children) {
 
 function updateFunctionComponent(fiber) {
     // 此处是获取fiber的子节点们，建立链表，但由于函数组件执行后返回的节点才是子节点，所以需要进行判断并使用数组包裹
-    const children = [fiber.type()];
+    const children = [fiber.type(fiber.props)];
 
-    initChildren(fiber, children);
+    reconcileChildren(fiber, children);
 }
 
 function updateHostComponent(fiber) {
@@ -134,15 +186,15 @@ function updateHostComponent(fiber) {
         const dom = (fiber.dom = createDom(fiber.type));
 
         // 2. 设置 props
-        updateProps(fiber.props, dom);
+        updateProps(dom, fiber.props, {});
     }
 
     const children = fiber.props.children;
-    initChildren(fiber, children);
+    reconcileChildren(fiber, children);
 }
 
 // 在有空闲时间的情况下进行dom的渲染
-function preformFiberOfUtil(fiber) {
+function preformFiberOfUnit(fiber) {
     // 判断fiber的type是否是function,是的话表示fiber是个函数组件，
     // 因为函数组件执行后本身就是dom所以不需要再创建dom
     const isFunctionComponent = typeof fiber.type === "function";
@@ -172,13 +224,25 @@ function preformFiberOfUtil(fiber) {
 //     if (!fiber.parent) {
 //         return;
 //     }
-
 //     return fiber.parent?.sibling || findParent(fiber.parent);
 // }
 
 requestIdleCallback(workLoop);
 
+// 更新props
+function update() {
+    // 给nextFiberOfUtil赋值，会重新启动preformFiberOfUnit函数
+    wipRoot = {
+        dom: currentRoot.dom,
+        props: currentRoot.props,
+        alertnate: currentRoot,
+    };
+
+    nextFiberOfUnit = wipRoot;
+}
+
 const React = {
+    update,
     render,
     createElement,
 };
