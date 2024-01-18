@@ -1,25 +1,65 @@
 import React from './croe/React.js'
 
-let num = 1
-let id = "id1"
-function Counter() {
+let fooNum = 1
+const Foo = () => {
+    const update = React.update()
     function handleClick() {
-        num++
-        React.update()
+        fooNum++
+        update()
     }
+    console.log("Foo")
     return (
-        <div id={id}>
-            组件函数: {num}
+        <div>
+            foo: {fooNum}
             <button onClick={handleClick}>click</button>
         </div>
     )
 }
 
+let barNum = 1
+let childNum = 1
+const Bar = () => {
+    const update = React.update()
+    function handleClick() {
+        barNum++
+        update()
+    }
+    console.log("Bar")
+
+    function Child() {
+        const update = React.update()
+        function handleClick() {
+            childNum++
+            update()
+        }
+        console.log("child")
+        return (
+            <div>child: {childNum} <button onClick={handleClick}>click child</button></div>
+        )
+    }
+    return (
+        <div>
+            bar: {barNum}
+            <Child></Child>
+            <button onClick={handleClick}>click</button>
+        </div>
+    )
+}
+
+let appNum = 1
 const App = () => {
+    const update = React.update()
+    function handleClick() {
+        appNum++
+        update()
+    }
+    console.log("APP")
     return (
         <div id='app'>
-            hello React
-            <Counter></Counter>
+            hello React： {appNum}
+            <button onClick={handleClick}>click</button>
+            <Foo></Foo>
+            <Bar></Bar>
         </div>
     )
 }

@@ -46,11 +46,24 @@ const render = (el, container) => {
  */
 let wipRoot = null;
 let currentRoot = null;
+let wipFiber = null;
 let nextFiberOfUnit = null;
+let deletions = [];
 function workLoop(deadline) {
     let shouldYield = false;
     while (!shouldYield && nextFiberOfUnit) {
         nextFiberOfUnit = preformFiberOfUnit(nextFiberOfUnit);
+
+        /**
+         * 优化：只更新组件。
+         * @description 获取结束位置
+         * update执行后，nextFiberOfUnit = wipRoot 的值就是要更新的组件。
+         * 执行preformFiberOfUnit后会拿到下一个要更新的组件，这时将wipRoot.sibling.type 与 nextFiberOfUnit.type 进行对比
+         * 如果相同则表示到了结束位置，然后将nextFiberOfUnit赋值null结束循环。
+         */
+        if (wipRoot?.sibling?.type === nextFiberOfUnit?.type) {
+            nextFiberOfUnit = null;
+        }
 
         shouldYield = deadline.timeRemaining() < 1;
     }
@@ -65,9 +78,38 @@ function workLoop(deadline) {
 }
 
 function commitRoot() {
+    deletions.forEach(commitDeletion);
     commitWork(wipRoot.child);
     currentRoot = wipRoot;
     wipRoot = null;
+    deletions = [];
+}
+
+function commitDeletion(fiber) {
+    // step1.直接删除节点
+    // 问题：如果是函数组件的话，函数组件的dom是null
+    // 解决：需要递归查找子节点
+    // fiber.parent.dom.removeChild(fiber.dom)
+
+    // step2.递归查找子节点
+    // 问题：函数组件查找到子节点后，因为函数组件dom为null，执行删除时会发现fiber.parent.dom为null，同样有问题
+    // 解决：循环查找dom不为null的父节点
+    // if (fiber.dom) {
+    //     fiber.parent.dom.removeChild(fiber.dom);
+    // } else {
+    //     commitDeletion(fiber.child);
+    // }
+
+    // step3.循环查找dom不为null的父节点
+    if (fiber.dom) {
+        let fiberParent = fiber.parent;
+        while (!fiberParent.dom) {
+            fiberParent = fiberParent.parent;
+        }
+        fiberParent.dom.removeChild(fiber.dom);
+    } else {
+        commitDeletion(fiber.child);
+    }
 }
 
 function commitWork(fiber) {
@@ -148,15 +190,31 @@ function reconcileChildren(fiber, children) {
                 alertnate: oldFiber,
             };
         } else {
-            newWork = {
-                type: item.type,
-                props: item.props,
-                child: null,
-                sibling: null,
-                parent: fiber,
-                dom: null,
-                effectTag: "placement",
-            };
+            // 添加新的节点，如果item是false，直接过
+            if (item) {
+                newWork = {
+                    type: item.type,
+                    props: item.props,
+                    child: null,
+                    sibling: null,
+                    parent: fiber,
+                    dom: null,
+                    effectTag: "placement",
+                };
+            }
+
+            // step1.删除老的节点
+            // 问题：如果有多个子节点的话，这种方式只能删除一个
+            // 解决：使用while循环查找子节点的sibling，有的话则继续删除
+            // if (oldFiber) {
+            //     deletions.push(oldFiber);
+            // }
+
+            // step2.循环查找子节点的sibling
+            while (oldFiber) {
+                deletions.push(oldFiber);
+                oldFiber = oldFiber.sibling;
+            }
         }
 
         // 如果有多个子节点的
@@ -169,11 +227,17 @@ function reconcileChildren(fiber, children) {
         } else {
             prevChild.sibling = newWork;
         }
-        prevChild = newWork;
+
+        // 由于child有false的情况，所以要进行一下判断
+        if (newWork) {
+            prevChild = newWork;
+        }
     });
 }
 
 function updateFunctionComponent(fiber) {
+    // console.log("fiber", fiber);
+    wipFiber = fiber;
     // 此处是获取fiber的子节点们，建立链表，但由于函数组件执行后返回的节点才是子节点，所以需要进行判断并使用数组包裹
     const children = [fiber.type(fiber.props)];
 
@@ -195,6 +259,8 @@ function updateHostComponent(fiber) {
 
 // 在有空闲时间的情况下进行dom的渲染
 function preformFiberOfUnit(fiber) {
+    // debugger;
+
     // 判断fiber的type是否是function,是的话表示fiber是个函数组件，
     // 因为函数组件执行后本身就是dom所以不需要再创建dom
     const isFunctionComponent = typeof fiber.type === "function";
@@ -231,14 +297,25 @@ requestIdleCallback(workLoop);
 
 // 更新props
 function update() {
-    // 给nextFiberOfUtil赋值，会重新启动preformFiberOfUnit函数
-    wipRoot = {
-        dom: currentRoot.dom,
-        props: currentRoot.props,
-        alertnate: currentRoot,
-    };
+    let currentFiber = wipFiber;
+    /**
+     * 优化：只更新组件。
+     * @description 获取要更新组件的起始点
+     * 这里使用了闭包。在app.jsx中可以看到，当执行updateFunctionComponent时，会调用函数组件，获取到闭包函数
+     * 这样就很巧妙的将currentFiber给存了起来，也就是当前函数组件的数据。
+     *
+     * 然后当我们执行闭包函数的时候，就会拿到要更新组件的旧dom树。
+     * 重新赋值给nextFiberOfUnit后，会重新执行更新逻辑
+     */
+    return () => {
+        wipRoot = {
+            ...currentFiber,
+            alertnate: currentFiber,
+        };
 
-    nextFiberOfUnit = wipRoot;
+        // 更新的时候，给nextFiberOfUtil赋值，会重新启动preformFiberOfUnit函数
+        nextFiberOfUnit = wipRoot;
+    };
 }
 
 const React = {
