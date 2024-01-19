@@ -236,7 +236,9 @@ function reconcileChildren(fiber, children) {
 }
 
 function updateFunctionComponent(fiber) {
-    // console.log("fiber", fiber);
+    stateHooks = [];
+    stateHookIndex = 0;
+
     wipFiber = fiber;
     // 此处是获取fiber的子节点们，建立链表，但由于函数组件执行后返回的节点才是子节点，所以需要进行判断并使用数组包裹
     const children = [fiber.type(fiber.props)];
@@ -318,7 +320,70 @@ function update() {
     };
 }
 
+// 完成useState
+let stateHooks;
+let stateHookIndex;
+function useState(initial) {
+    if (initial === undefined) {
+        console.error("state default must have value");
+        initial = "";
+    }
+    let currentFiber = wipFiber;
+    // 重复调用同一个useState的话，stateHook会被覆盖，所以要把最新的值存起来
+    const oldState = currentFiber.alertnate?.stateHooks[stateHookIndex];
+    const stateHook = {
+        state: oldState ? oldState.state : initial,
+        quote: oldState ? oldState.quote : [],
+    };
+
+    // 组件渲染时会重新触发useState，调用action拿到最新的state
+    stateHook.quote.forEach((action) => {
+        stateHook.state = action(stateHook.state);
+    });
+
+    // 问题：组件中会有多个useState的情况，如果直接使用的话，会导致后面的覆盖前面的
+    // 解决：创建一个全局变量，在函数组件更新时（updateFunctionComponent）初始化/置为空，
+    // 在调用 useState 时将statehook存储到stateHooks中，然后再调用useState时依次取出
+    stateHookIndex++;
+    stateHooks.push(stateHook);
+
+    // 调用完成后置空
+    stateHook.quote = [];
+
+    // 将最新的stateHooks存起来，下次调用时先用这个
+    currentFiber.stateHooks = stateHooks;
+
+    // 当我们调用set函数时，会调用action函数，改变变量的值，但是需要重新渲染组件，所以需要给nextFiberOfUnit重新赋值来触发重新渲染。
+    function setState(action) {
+        // 优化：针对stateHook.state没有变化的情况，就没有必要再重新出发渲染
+        // 解决：所以我们可以提前拿到action的值，然后进行对比
+        const eagerState =
+            typeof action === "function" ? action(stateHook.state) : action;
+        if (eagerState === stateHook.state) return;
+
+        // step1.触发action函数，将state传进去后返回新的state后，进行赋值
+        // 问题：假设一个值从10 -> 11 -> 12 -> 13,每一次变化都会触发重新渲染
+        // 解决：可以将action收集起来，因为在组件中调用setState是同步的，所以只有在所有的setState触发完后再重新触发渲染逻辑。
+        // 当触发了渲染逻辑后会重新执行useState，这时在调用收集的action，拿到最新的state
+        // stateHook.state = action(stateHook.state);
+
+        // step2.收集action
+        stateHook.quote.push(
+            typeof action === "function" ? action : () => action
+        );
+
+        wipRoot = {
+            ...currentFiber,
+            alertnate: currentFiber,
+        };
+        nextFiberOfUnit = wipRoot;
+    }
+
+    return [stateHook.state, setState];
+}
+
 const React = {
+    useState,
     update,
     render,
     createElement,

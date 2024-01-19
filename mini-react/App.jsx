@@ -1,65 +1,50 @@
 import React from './croe/React.js'
 
-let fooNum = 1
 const Foo = () => {
-    const update = React.update()
+    const [count, setCount] = React.useState(10)
+    const [bar, setBar] = React.useState(false)
     function handleClick() {
-        fooNum++
-        update()
+        setCount((c) => c + 1)
+        setBar(() => !bar)
     }
-    console.log("Foo")
+
     return (
         <div>
-            foo: {fooNum}
+            {count}
+            <div>
+                {bar ? 'true' : 'false'}
+            </div>
+            {/* <div>{num}</div> */}
             <button onClick={handleClick}>click</button>
         </div>
     )
 }
 
-let barNum = 1
-let childNum = 1
 const Bar = () => {
-    const update = React.update()
+    const [bar, setBar] = React.useState('bar')
     function handleClick() {
-        barNum++
-        update()
+        setBar(() => bar + 'bar')
     }
-    console.log("Bar")
 
-    function Child() {
-        const update = React.update()
-        function handleClick() {
-            childNum++
-            update()
-        }
-        console.log("child")
-        return (
-            <div>child: {childNum} <button onClick={handleClick}>click child</button></div>
-        )
-    }
     return (
         <div>
-            bar: {barNum}
-            <Child></Child>
+            bar: {bar}
             <button onClick={handleClick}>click</button>
         </div>
     )
 }
 
-let appNum = 1
+
 const App = () => {
-    const update = React.update()
-    function handleClick() {
-        appNum++
-        update()
-    }
-    console.log("APP")
+
+
+    // console.log("APP")
     return (
         <div id='app'>
-            hello React： {appNum}
-            <button onClick={handleClick}>click</button>
+            hello React：
+            {/* {appNum} */}
             <Foo></Foo>
-            <Bar></Bar>
+            {/* <Bar></Bar> */}
         </div>
     )
 }
