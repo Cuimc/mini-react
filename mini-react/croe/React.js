@@ -80,9 +80,59 @@ function workLoop(deadline) {
 function commitRoot() {
     deletions.forEach(commitDeletion);
     commitWork(wipRoot.child);
+    // useEffect的执行是在dom渲染完成后执行
+    commitEffectHook();
     currentRoot = wipRoot;
     wipRoot = null;
     deletions = [];
+}
+
+function commitEffectHook() {
+    // effect的调用采用的是循环调用，即要从dom树的根节点开始循环
+    function run(fiber) {
+        if (!fiber) return;
+
+        if (!fiber.alternate) {
+            // init，首次渲染时的调用
+
+            // cleanup 将hook.callback()的返回值（函数）赋值给cleanup
+            fiber.effectHooks?.forEach((hook) => {
+                hook.cleanup = hook.callback();
+            });
+        } else {
+            // update，更新时的调用
+            // 先取到旧的effecthook.deps，与新的effecthook.deps进行对比
+            fiber.effectHooks?.forEach((newHook, index) => {
+                if (newHook.deps.length) {
+                    const oldEffectHooks = fiber.alternate?.effectHooks;
+                    oldEffectHooks[index].deps.some((oldDep, i) => {
+                        const needUpdate = oldDep !== newHook.deps[i];
+                        needUpdate && (newHook.cleanup = newHook.callback());
+                    });
+                }
+            });
+        }
+
+        run(fiber.child);
+        run(fiber.sibling);
+    }
+
+    // cleanup的调用时机是第二次调用时先执行上一次的cleanup
+    // 所以也要从根节点开始遍历去调用，但是！！，此次调用的是上一次的，所以遍历的事alternate
+    function runCleanup(fiber) {
+        if (!fiber) return;
+        fiber.alternate?.effectHooks?.forEach((hook) => {
+            if (hook.deps.length) {
+                hook.cleanup && hook.cleanup();
+            }
+        });
+
+        runCleanup(fiber.child);
+        runCleanup(fiber.sibling);
+    }
+
+    runCleanup(wipRoot);
+    run(wipRoot);
 }
 
 function commitDeletion(fiber) {
@@ -129,7 +179,7 @@ function commitWork(fiber) {
         }
     } else if (fiber.effectTag === "update") {
         // 更新的话，需要旧的props和新的props
-        updateProps(fiber.dom, fiber.props, fiber.alertnate?.props);
+        updateProps(fiber.dom, fiber.props, fiber.alternate?.props);
     }
 
     commitWork(fiber.child);
@@ -168,7 +218,7 @@ function updateProps(dom, nextProps, prevProps) {
 
 // 将vdom转化成链表，设置好指针
 function reconcileChildren(fiber, children) {
-    let oldFiber = fiber.alertnate?.child;
+    let oldFiber = fiber.alternate?.child;
     let prevChild = null; // 表示设置的上一个的子节点
     children.forEach((item, index) => {
         // 由于要链表的设计需要一个父节点来查找叔叔节点，所以需要再子节点的vdom上添加一个父节点的标识，来连接到叔叔节点上
@@ -187,7 +237,7 @@ function reconcileChildren(fiber, children) {
                 parent: fiber,
                 dom: oldFiber.dom, // 这里是因为更新，不牵扯dom的变化，所以使用old即可
                 effectTag: "update",
-                alertnate: oldFiber,
+                alternate: oldFiber,
             };
         } else {
             // 添加新的节点，如果item是false，直接过
@@ -238,6 +288,7 @@ function reconcileChildren(fiber, children) {
 function updateFunctionComponent(fiber) {
     stateHooks = [];
     stateHookIndex = 0;
+    effectHooks = [];
 
     wipFiber = fiber;
     // 此处是获取fiber的子节点们，建立链表，但由于函数组件执行后返回的节点才是子节点，所以需要进行判断并使用数组包裹
@@ -312,7 +363,7 @@ function update() {
     return () => {
         wipRoot = {
             ...currentFiber,
-            alertnate: currentFiber,
+            alternate: currentFiber,
         };
 
         // 更新的时候，给nextFiberOfUtil赋值，会重新启动preformFiberOfUnit函数
@@ -330,7 +381,7 @@ function useState(initial) {
     }
     let currentFiber = wipFiber;
     // 重复调用同一个useState的话，stateHook会被覆盖，所以要把最新的值存起来
-    const oldState = currentFiber.alertnate?.stateHooks[stateHookIndex];
+    const oldState = currentFiber.alternate?.stateHooks[stateHookIndex];
     const stateHook = {
         state: oldState ? oldState.state : initial,
         quote: oldState ? oldState.quote : [],
@@ -374,7 +425,7 @@ function useState(initial) {
 
         wipRoot = {
             ...currentFiber,
-            alertnate: currentFiber,
+            alternate: currentFiber,
         };
         nextFiberOfUnit = wipRoot;
     }
@@ -382,8 +433,22 @@ function useState(initial) {
     return [stateHook.state, setState];
 }
 
+// 实现useEffect
+let effectHooks;
+function useEffect(callback, deps) {
+    // 将获取到的 effecthoolk 存起来,并挂载到相对应的函数组件的对象上去
+    const effectHook = {
+        callback,
+        deps,
+        cleanup: undefined,
+    };
+    effectHooks.push(effectHook);
+    wipFiber.effectHooks = effectHooks;
+}
+
 const React = {
     useState,
+    useEffect,
     update,
     render,
     createElement,

@@ -8,6 +8,30 @@ const Foo = () => {
         setBar(() => !bar)
     }
 
+    React.useEffect(() => {
+        console.log("init")
+
+        return () => {
+            console.log('cleanup-0')
+        }
+    }, [])
+
+    React.useEffect(() => {
+        console.log("init:", bar)
+
+        return () => {
+            console.log('cleanup-1')
+        }
+    }, [bar])
+
+    React.useEffect(() => {
+        console.log("count:", count)
+
+        return () => {
+            console.log('cleanup-2')
+        }
+    }, [count])
+
     return (
         <div>
             {count}
