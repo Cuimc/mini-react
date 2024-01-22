@@ -256,14 +256,8 @@ function reconcileChildren(fiber, children) {
             // step1.删除老的节点
             // 问题：如果有多个子节点的话，这种方式只能删除一个
             // 解决：使用while循环查找子节点的sibling，有的话则继续删除
-            // if (oldFiber) {
-            //     deletions.push(oldFiber);
-            // }
-
-            // step2.循环查找子节点的sibling
-            while (oldFiber) {
+            if (oldFiber) {
                 deletions.push(oldFiber);
-                oldFiber = oldFiber.sibling;
             }
         }
 
@@ -283,6 +277,12 @@ function reconcileChildren(fiber, children) {
             prevChild = newWork;
         }
     });
+
+    // step2.循环查找子节点的sibling
+    while (oldFiber) {
+        deletions.push(oldFiber);
+        oldFiber = oldFiber.sibling;
+    }
 }
 
 function updateFunctionComponent(fiber) {
